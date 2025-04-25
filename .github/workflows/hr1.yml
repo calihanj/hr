@@ -1,0 +1,214 @@
+-- create warehouse database and schema
+/*
+CREATE OR REPLACE WAREHOUSE HR_WH
+    WAREHOUSE_SIZE = 'xsmall'
+    WAREHOUSE_TYPE = 'standard'
+    AUTO_SUSPEND = 60
+    AUTO_RESUME = TRUE
+    INITIALLY_SUSPENDED = TRUE
+COMMENT = 'data warehouse for HR Project';
+
+CREATE OR REPLACE DATABASE HR_PROJECT;
+
+CREATE OR REPLACE SCHEMA STAY_INTERVIEWS;
+
+-- create file format
+
+CREATE OR REPLACE FILE FORMAT troubleshoot_format
+  TYPE = 'CSV'
+  FIELD_DELIMITER = ','
+  FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+  ESCAPE_UNENCLOSED_FIELD = '\\'
+  SKIP_HEADER = 1         -- Adjust if your file has headers
+  NULL_IF = ('NULL', 'null', '')
+  EMPTY_FIELD_AS_NULL = TRUE
+  REPLACE_INVALID_CHARACTERS = TRUE
+  ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE;
+  
+-- create stages
+
+CREATE OR REPLACE STAGE EAST_STAGE;
+CREATE OR REPLACE STAGE WEST_STAGE; 
+*/
+
+---- Create east & west tables
+CREATE OR REPLACE TABLE EAST (
+    sub_topic VARCHAR(25),
+    question VARCHAR(),
+    feedback VARCHAR(),
+    sentiment VARCHAR(10),
+    theme VARCHAR(),
+    emp_id INTEGER,
+    emp_name VARCHAR(25),
+    position VARCHAR(50),
+    location VARCHAR(25),
+    hire_date DATE
+);
+
+
+CREATE OR REPLACE TABLE WEST (
+    sub_topic VARCHAR(25),
+    question VARCHAR(),
+    feedback VARCHAR(),
+    sentiment VARCHAR(10),
+    theme VARCHAR(),
+    emp_id INTEGER,
+    emp_name VARCHAR(25),
+    position VARCHAR(50),
+    hire_date DATE,
+    birthdate VARCHAR (25),
+    location VARCHAR (25)
+);
+
+-- copy csv data into east & west tables
+COPY INTO EAST
+FROM @EAST_STAGE
+FILE_FORMAT = troubleshoot_format
+
+
+COPY INTO WEST
+FROM @WEST_STAGE
+FILE_FORMAT = troubleshoot_format
+
+-- examine east & west tables
+SELECT * FROM EAST;
+SELECT * FROM WEST;
+
+-- filter for null values (none conducted or entered interviews) ... need to standardize
+CREATE OR REPLACE TABLE EAST AS
+    SELECT *
+    FROM EAST
+    WHERE Sentiment IS NOT NULL;
+
+    
+CREATE OR REPLACE TABLE WEST AS
+    SELECT *
+    FROM WEST
+    WHERE Feedback IS NOT NULL;
+
+-- alter east & west tables
+ALTER TABLE EAST ADD COLUMN yrs_w_cb FLOAT;
+UPDATE EAST
+SET yrs_w_cb = DATEDIFF('YEAR', Hire_Date, CURRENT_DATE());
+ALTER TABLE EAST DROP COLUMN Emp_Name, Hire_Date;
+ALTER TABLE EAST ADD COLUMN Region VARCHAR(4);
+UPDATE EAST SET Region = 'East';
+
+
+ALTER TABLE WEST ADD COLUMN yrs_w_cb FLOAT;
+UPDATE WEST
+SET yrs_w_cb = DATEDIFF('YEAR', Hire_Date, CURRENT_DATE());
+ALTER TABLE WEST DROP COLUMN Emp_Name, Hire_Date, Birthdate;
+ALTER TABLE WEST ADD COLUMN Region VARCHAR(4);
+UPDATE WEST SET Region = 'West';
+
+-- examine east & west tables
+SELECT * FROM EAST;
+SELECT * FROM WEST;
+
+-- Create unioned table STAY
+CREATE TABLE STAY AS
+SELECT * FROM EAST
+UNION ALL
+SELECT * FROM WEST;
+
+-- examine STAY table
+SELECT * FROM STAY;
+
+-- create interview_id column
+/*
+ALTER TABLE STAY ADD COLUMN interview_id NUMBER;
+UPDATE STAY
+SET interview_id = subquery.interview_id
+FROM (
+    SELECT 
+        emp_id,
+        CEIL(ROW_NUMBER() OVER (ORDER BY emp_id) / 12) AS interview_id
+    FROM STAY
+) AS subquery
+WHERE STAY.emp_id = subquery.emp_id;
+*/
+
+-- add surogate key column
+CREATE OR REPLACE TABLE STAY_new AS
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY emp_id) AS row_id,
+    *
+FROM STAY;
+ALTER TABLE STAY SWAP WITH STAY_new;
+DROP TABLE STAY_new;
+
+-- Add the interview_id column
+ALTER TABLE STAY ADD COLUMN interview_id NUMBER;
+UPDATE STAY 
+SET interview_id = subquery.interview_id
+FROM (
+    SELECT 
+        emp_id,
+        DENSE_RANK() OVER (ORDER BY emp_id) AS interview_id,
+        -- Include a unique identifier column to match rows
+        row_id
+    FROM STAY
+) AS subquery
+WHERE STAY.row_id = subquery.row_id;
+
+-- create topic column
+ALTER TABLE STAY ADD COLUMN topic VARCHAR;
+UPDATE STAY
+SET topic = CASE
+    WHEN LOWER(sub_topic) LIKE '%culture%' THEN 'Culture'
+    WHEN LOWER(sub_topic) LIKE '%morale%' THEN 'Morale'
+    WHEN LOWER(sub_topic) LIKE '%benefit%' THEN 'Benefits'
+    ELSE 'General'
+END;
+
+-- drop subtopic column and employee id
+ALTER TABLE STAY DROP COLUMN sub_topic,  emp_id, row_id;
+
+-- create final stay table
+
+CREATE OR REPLACE TABLE temp_table AS
+SELECT 
+    interview_id,
+    topic,
+    question,
+    sentiment,
+    feedback,
+    theme,
+    position,
+    yrs_w_cb,
+    location,
+    region
+FROM STAY
+ORDER BY interview_id, topic;
+
+DROP TABLE STAY;
+ALTER TABLE temp_table RENAME TO STAY;
+
+-- clean up questions column
+UPDATE STAY
+SET question = REGEXP_REPLACE(question, '[^[:print:]]', '');
+
+-- clean up sentiment column
+UPDATE STAY
+SET sentiment = INITCAP(sentiment);
+
+-- clean up feedback column
+UPDATE STAY
+SET feedback = UPPER(LEFT(feedback, 1)) || SUBSTRING(feedback, 2);
+
+UPDATE STAY
+SET feedback = REGEXP_REPLACE(
+    feedback,
+    '\\. ([a-z])', 
+    '. ' || UPPER('\\1'), 
+    1, 0, 'i'
+);
+
+UPDATE STAY
+SET feedback = REGEXP_REPLACE(feedback, '(No|Yes|Nothing)\\. ', '\\1 ', 1, 0, 'i');
+
+SELECT * FROM STAY;
+
+
+

@@ -76,15 +76,15 @@ SELECT * FROM WEST;
 
 -- filter for null values (none conducted or entered interviews) ... need to standardize
 CREATE OR REPLACE TABLE EAST AS
-    SELECT *
-    FROM EAST
-    WHERE Sentiment IS NOT NULL;
+SELECT *
+FROM EAST
+WHERE Sentiment IS NOT NULL;
 
     
 CREATE OR REPLACE TABLE WEST AS
-    SELECT *
-    FROM WEST
-    WHERE Feedback IS NOT NULL;
+SELECT *
+FROM WEST
+WHERE Feedback IS NOT NULL;
 
 -- alter east & west tables
 ALTER TABLE EAST ADD COLUMN yrs_w_cb FLOAT;
@@ -210,5 +210,9 @@ SET feedback = REGEXP_REPLACE(feedback, '(No|Yes|Nothing)\\. ', '\\1 ', 1, 0, 'i
 
 SELECT * FROM STAY;
 
+-- create views
+CREATE OR REPLACE VIEW stay_interview_draft AS
+SELECT *
+FROM STAY;
 
-
+SELECT * FROM stay_interview_draft;

@@ -115,20 +115,6 @@ SELECT * FROM WEST;
 -- examine STAY table
 SELECT * FROM STAY;
 
--- create interview_id column
-/*
-ALTER TABLE STAY ADD COLUMN interview_id NUMBER;
-UPDATE STAY
-SET interview_id = subquery.interview_id
-FROM (
-    SELECT 
-        emp_id,
-        CEIL(ROW_NUMBER() OVER (ORDER BY emp_id) / 12) AS interview_id
-    FROM STAY
-) AS subquery
-WHERE STAY.emp_id = subquery.emp_id;
-*/
-
 -- add surogate key column
 CREATE OR REPLACE TABLE STAY_new AS
 SELECT 

@@ -1,0 +1,265 @@
+// Set the Roles, Warehouses and Databases
+
+USE ROLE ACCOUNTADMIN;
+
+USE WAREHOUSE COMPUTE_WH;
+
+CREATE OR REPLACE DATABASE MYDB;
+
+CREATE OR REPLACE SCHEMA MYDB.MYSCHEMA;
+
+
+
+// TABLE PRACTICE
+
+// Create a permanent table
+CREATE OR REPLACE TABLE PERMANENT_TABLE
+(
+ID INT,
+NAME STRING
+);
+
+ALTER TABLE PERMANENT_TABLE SET DATA_RETENTION_TIME_IN_DAYS = 90;
+
+// Create a transient table
+CREATE OR REPLACE TRANSIENT TABLE TRANSIENT_TABLE
+(
+ID INT,
+NAME STRING
+);
+
+// Create a temporary table
+CREATE OR REPLACE TEMPORARY TABLE TEMPORARY_TABLE
+(
+ID INT,
+NAME STRING
+);
+
+SHOW TABLES;
+
+
+
+// VIEW PRACTICE
+
+// Create an employee table
+CREATE OR REPLACE TABLE employees (
+    id INTEGER,
+    name VARCHAR(50),
+    department VARCHAR(50),
+    salary INTEGER
+);
+
+// insert data into the table
+INSERT INTO employees (id, name, department, salary)
+VALUES (1, 'Pat Fay', 'HR', 50000),
+       (2, 'Donald OConnell', 'IT', 75000),
+       (3, 'Steven King', 'Sales', 60000),
+       (4, 'Susan Mavris', 'IT', 80000),
+       (5, 'Jennifer Whalen', 'Marketing', 55000);
+
+// select data from the table
+SELECT * FROM employees;
+
+// create a view called "it_employees" that only includes the employees from the IT Department
+CREATE OR REPLACE VIEW it_employees AS
+SELECT id, name, salary
+FROM employees
+WHERE department = 'IT';
+
+// Select data from the it_employees view
+SELECT * FROM it_employees;
+
+// create a secure view called "hr_employees" that only includes the employees from the HR Department
+CREATE OR REPLACE secure VIEW hr_employees AS
+SELECT id, name, salary
+FROM employees
+WHERE department = 'HR';
+
+// Select data from the hr_employees view
+SELECT * FROM hr_employees;
+
+//create a view that aggregates the salaries by department
+CREATE OR REPLACE VIEW employee_salaries AS
+SELECT department, SUM(salary) AS total_salary
+FROM employees
+GROUP BY department;
+
+// Select data from the employee_salaries view
+SELECT * FROM employee_salaries
+ORDER BY total_salary;
+
+// create a materialized view that aggregates the salaries by department, order by not allowed
+CREATE OR REPLACE MATERIALIZED VIEW materialized_employee_salaries AS
+SELECT department, SUM(salary) AS total_salary
+FROM employees
+GROUP BY department;
+
+// Select data from the employee_salaries view
+SELECT * FROM materialized_employee_salaries
+ORDER BY total_salary;
+
+show views;
+//drop table MYDB.MYSCHEMA.EMPLOYEES
+//alter session set use_cached_result = false;
+
+
+
+// STAGE PRACTICE
+
+// Create a customer table
+CREATE OR REPLACE TABLE customer (
+    id INTEGER,
+    name VARCHAR(50),
+    age INTEGER,
+    state VARCHAR(50)
+);
+
+// access table stage
+list @%customer;
+
+// access user stage
+list @-;
+
+// Create a named stage
+CREATE OR REPLACE STAGE CUSTOMER_STAGE;
+
+// Access the names internal stage
+list @CUSTOMER_STAGE;
+
+// Truncate the table
+TRUNCATE TABLE CUSTOMER;
+
+// Load data to customer table
+copy into customer
+from @CUSTOMER_STAGE
+file_format = (TYPE = 'CSV' SKIP_HEADER = 1);
+
+// Select data from the table
+SELECT * FROM CUSTOMER;
+
+//undrop schema myschema;
+
+
+
+// FILE FORMAT PRACTICE
+
+// Create a student table
+CREATE OR REPLACE TABLE STUDENT (
+    id INTEGER,
+    name VARCHAR(50),
+    age INTEGER,
+    marks INTEGER
+);
+
+// Create a named stage
+CREATE OR REPLACE STAGE STUDENT_STAGE;
+
+// Access the names internal stage
+list @STUDENT_STAGE;
+
+// Create a CSV File Format
+CREATE OR REPLACE FILE FORMAT CSV_FORMAT
+TYPE = 'CSV'
+FIELD_DELIMITER = '.'
+RECORD_DELIMITER = '\n'
+SKIP_HEADER = 1;
+
+// load data to customer table with file format
+copy into STUDENT
+from @STUDENT_STAGE
+FILE_FORMAT = (FORMAT_NAME = CSV_FORMAT);
+
+// create a JSON file format
+CREATE OR REPLACE FILE FORMAT JSON_FORMAT
+TYPE = 'JSON';
+
+SHOW FILE FORMATS;
+
+
+
+// BULK DATA LOAD PRACTICE
+
+// Create a user table
+CREATE OR REPLACE TABLE USER (
+    id INTEGER,
+    name VARCHAR(50),
+    location VARCHAR(50),
+    email VARCHAR(50)
+);
+
+// Create a storage integration with s3 and iam role
+CREATE OR REPLACE STORAGE INTEGRATION s3_int
+    TYPE = EXTERNAL_STAGE
+    STORAGE_PROVIDER = 'S3'
+    ENABLED = TRUE
+    STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::294845879996:role/snowflakerole'
+    STORAGE_ALLOWED_LOCATIONS = ('s3://de-academy-training-bucket/');
+
+// Describe the storage integration
+DESC INTEGRATION s3_int;
+
+// Create CSV file format 
+
+// Create an external s3 stage
+CREATE OR REPLACE STAGE my_s3_stage
+    STORAGE_INTEGRATION = s3_int
+    URL = 's3://de-academy-training-bucket/'
+    FILE_FORMAT = CSV_FORMAT;
+
+// access the external stage
+list @my_s3_stage;
+
+// load data to user table without file format
+copy into USER
+from @my_s3_stage
+FILE_FORMAT = (FORMAT_NAME = CSV_FORMAT)
+
+// select data from table
+SELECT * FROM USER;
+
+
+
+// CONTINUOUS DATA LOADING PRACTICE (SNOWPIPE)
+
+//create an event table
+CREATE OR REPLACE TABLE EVENT (
+EVENT VARIANT
+);
+
+// Create a storage integration with s3 and iam role
+CREATE OR REPLACE STORAGE INTEGRATION s3_snowpipe_int
+    TYPE = EXTERNAL_STAGE
+    STORAGE_PROVIDER = 'S3'
+    ENABLED = TRUE
+    STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::294845879996:role/snowpipe'
+    STORAGE_ALLOWED_LOCATIONS = ('s3://de-academy-training-bucket/event/');
+
+// Describe the storage integration
+DESC INTEGRATION s3_snowpipe_int;
+
+// Create an external s3 stage
+CREATE OR REPLACE STAGE my_s3_snowpipe_stage
+    STORAGE_INTEGRATION = s3_snowpipe_int
+    URL = 's3://de-academy-training-bucket/event/'
+    FILE_FORMAT = JSON_FORMAT;
+
+// access the external stage
+list @my_s3_snowpipe_stage;
+
+// Create a snowpipe to load the event data from s3
+CREATE OR REPLACE s3_pipe
+auto_ingest = true AS
+copy into event
+from @my_s3_snowpipe_stage
+FILE_FORMAT = (FORMAT_NAME = JSON_FORMAT);
+
+// Select the status of the pipe
+SELECT SYSTEM$PIPE_STATUS('s3_pipe');
+
+// Get the notification channel
+SHOW PIPES;
+
+// Select data from event table
+SELECT * FROM EVENT;
+
+
